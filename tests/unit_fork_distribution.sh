@@ -14,6 +14,9 @@ grep -q 'DISTRIBUTION_SCRIPTS_REPO="GamerKhaan/scripts"' "$node" || fail "node s
 grep -q 'DISTRIBUTION_NODE_REPO="GamerKhaan/node"' "$node" || fail "node release repo is not fork-owned"
 grep -q 'DISTRIBUTION_NODE_SERVICE_REPO="GamerKhaan/node-serviced"' "$node" || fail "node-serviced repo is not fork-owned"
 grep -q 'DISTRIBUTION_NODE_IMAGE="ghcr.io/gamerkhaan/node"' "$node" || fail "node image is not fork-owned"
+grep -Fq "semver_regex=" "$node" || fail "node version parser has no reusable semver contract"
+grep -Fq '(-[0-9A-Za-z.-]+)?' "$node" || fail "node version parser does not admit AWG release suffixes"
+grep -Fq '"$node_version" =~ $semver_regex' "$node" || fail "node install path does not use the owned semver contract"
 
 for file in "$ROOT"/docker-compose/*.yml; do
   if grep -Eq 'image:[[:space:]]+pasarguard/(panel|node)(:|$)' "$file"; then

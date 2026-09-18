@@ -1218,7 +1218,8 @@ install_command() {
         fi
     }
     # Check if the version is valid and exists
-    if [[ "$node_version" == "latest" || "$node_version" == "pre-release" || "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    semver_regex='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+    if [[ "$node_version" == "latest" || "$node_version" == "pre-release" || "$node_version" =~ $semver_regex ]]; then
         if check_version_exists "$node_version"; then
             colorized_echo cyan "================================"
             colorized_echo cyan "Installing PasarGuard Node"
