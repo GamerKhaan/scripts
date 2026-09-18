@@ -257,18 +257,18 @@ send_backup_to_telegram() {
         exit 1
     fi
 
-    if [ "$BACKUP_SERVICE_ENABLED" != "true" ]; then
+    if [ "${BACKUP_SERVICE_ENABLED:-false}" != "true" ]; then
         colorized_echo yellow "Backup service is not enabled. Skipping Telegram upload."
         return
     fi
 
     # Validate Telegram configuration
-    if [ -z "$BACKUP_TELEGRAM_BOT_KEY" ]; then
+    if [ -z "${BACKUP_TELEGRAM_BOT_KEY:-}" ]; then
         colorized_echo red "Error: BACKUP_TELEGRAM_BOT_KEY is not set in .env file"
         return 1
     fi
 
-    if [ -z "$BACKUP_TELEGRAM_CHAT_ID" ]; then
+    if [ -z "${BACKUP_TELEGRAM_CHAT_ID:-}" ]; then
         colorized_echo red "Error: BACKUP_TELEGRAM_CHAT_ID is not set in .env file"
         return 1
     fi

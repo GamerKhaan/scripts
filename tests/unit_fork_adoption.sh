@@ -91,6 +91,17 @@ fi
 assert_true "install command dispatches existing installs to adoption"   grep -Fq 'adopt_existing_pasarguard "$pasarguard_version"' "$ROOT_DIR/pasarguard.sh"
 assert_true "install command tracks existing installation mode"   grep -Fq 'existing_install="true"' "$ROOT_DIR/pasarguard.sh"
 
+ENV_FILE="$WORK_DIR/no-backup-service.env"
+printf '%s\n' 'SQLALCHEMY_DATABASE_URL=sqlite+aiosqlite:///db.sqlite3' >"$ENV_FILE"
+if (
+  unset BACKUP_SERVICE_ENABLED BACKUP_TELEGRAM_BOT_KEY BACKUP_TELEGRAM_CHAT_ID
+  send_backup_to_telegram 20260101000000 >/dev/null 2>&1
+); then
+  pass "backup upload safely skips when backup service variables are absent"
+else
+  fail "backup upload safely skips when backup service variables are absent"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
