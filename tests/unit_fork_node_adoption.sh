@@ -105,6 +105,26 @@ install_command() { return 0; }
 pg_node_main install
 assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$PRE_DISPATCH_SHA" "install dispatch does not rewrite existing SSL paths before adoption backup"
 
+if declare -F resolve_latest_owned_node_release >/dev/null 2>&1; then
+  curl() { printf '%s\n' '{"tag_name":"v0.5.4-awg31.9"}'; }
+  assert_eq "$(resolve_latest_owned_node_release)" "v0.5.4-awg31.9" "node update resolves latest owned release"
+else
+  fail "resolve_latest_owned_node_release exists"
+fi
+
+UPDATE_DIR="$WORK_DIR/update-node"
+mkdir -p "$UPDATE_DIR"
+COMPOSE_FILE="$UPDATE_DIR/docker-compose.yml"
+printf '%s\n' 'services:' '  node:' '    image: ghcr.io/gamerkhaan/node:v0.5.4-awg31.1' >"$COMPOSE_FILE"
+APP_NAME="update-node"
+docker() { [ "${1:-}" = "pull" ] && [ "${2:-}" = "ghcr.io/gamerkhaan/node:v0.5.4-awg31.9" ]; }
+set_owned_node_image() { sed -i "s#image: .*#image: $1#" "$COMPOSE_FILE"; }
+compose_mock() { return 0; }
+COMPOSE="compose_mock"
+wait_for_node_health() { return 0; }
+if update_node; then pass "node update switches to latest owned release"; else fail "node update switches to latest owned release"; fi
+assert_true "node update writes latest owned image" grep -Fq 'image: ghcr.io/gamerkhaan/node:v0.5.4-awg31.9' "$COMPOSE_FILE"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

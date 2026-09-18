@@ -1007,9 +1007,56 @@ update_node_script() {
     colorized_echo green "node script updated successfully"
 }
 
-# Pull latest Docker images for the node services.
+# Resolve, pull, activate, and verify the latest owned Node release.
+# The compose file is restored and the previous node restarted on failure.
 update_node() {
-    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
+    local latest_tag=""
+    local target_image=""
+    local compose_backup=""
+
+    latest_tag=$(resolve_latest_owned_node_release) || {
+        colorized_echo red "Could not resolve the latest GamerKhaan Node release."
+        return 1
+    }
+    target_image=$(owned_node_image_for_version "$latest_tag")
+
+    colorized_echo blue "Resolved latest owned Node release: $latest_tag"
+    colorized_echo blue "Pulling owned Node image: $target_image"
+    if ! docker pull "$target_image"; then
+        colorized_echo red "Failed to pull $target_image; current Node remains unchanged."
+        return 1
+    fi
+
+    compose_backup=$(mktemp "${COMPOSE_FILE}.update.XXXXXX") || return 1
+    cp -a "$COMPOSE_FILE" "$compose_backup"
+
+    if ! set_owned_node_image "$target_image"; then
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d node; then
+        colorized_echo red "Node update activation failed; restoring previous compose."
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d node >/dev/null 2>&1 || true
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    if ! wait_for_node_health; then
+        colorized_echo red "Node update health check failed; restoring previous compose."
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d node >/dev/null 2>&1 || true
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    rm -f "$compose_backup"
+    printf 'distribution=GamerKhaan\nimage=%s\nupdated_at=%s\n' \
+        "$target_image" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$APP_DIR/.gamerkhaan-distribution"
+    chmod 644 "$APP_DIR/.gamerkhaan-distribution" 2>/dev/null || true
+    colorized_echo green "Node updated to $latest_tag."
 }
 
 # Check if node application directory exists.
@@ -1063,6 +1110,17 @@ sync_env_ssl_paths() {
 owned_node_image_for_version() {
     local version="${1:-latest}"
     printf '%s:%s\n' "$DISTRIBUTION_NODE_IMAGE" "$version"
+}
+
+# Resolve the latest stable release tag from the owned Node repository.
+resolve_latest_owned_node_release() {
+    local tag=""
+    tag=$(curl -fsSL --max-time 10 "https://api.github.com/repos/${DISTRIBUTION_NODE_REPO}/releases/latest" \
+        | jq -r '.tag_name // empty') || return 1
+    if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        return 1
+    fi
+    printf '%s\n' "$tag"
 }
 
 # Classify an existing Node compose file without executing it.
@@ -1925,11 +1983,11 @@ update_command() {
     update_node_script
     uninstall_completion
     install_completion
-    colorized_echo blue "Pulling latest version"
-    update_node
-    colorized_echo blue "Restarting node services"
-    down_node
-    up_node
+    colorized_echo blue "Updating to the latest owned release"
+    if ! update_node; then
+        colorized_echo red "Node update failed; previous runtime was restored."
+        exit 1
+    fi
 
     if [ "$no_update_service" = false ]; then
         update_service_if_installed

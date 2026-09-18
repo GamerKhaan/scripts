@@ -1138,6 +1138,17 @@ owned_panel_image_for_version() {
     printf '%s:%s\n' "$DISTRIBUTION_PANEL_IMAGE" "$version"
 }
 
+# Resolve the latest stable release tag from the owned Panel repository.
+resolve_latest_owned_panel_release() {
+    local tag=""
+    tag=$(curl -fsSL --max-time 10 "https://api.github.com/repos/${DISTRIBUTION_PANEL_REPO}/releases/latest" \
+        | jq -r '.tag_name // empty') || return 1
+    if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        return 1
+    fi
+    printf '%s\n' "$tag"
+}
+
 # Classify an existing Panel compose file without executing it.
 # Outputs: upstream, owned, or unknown.
 detect_existing_panel_distribution() {
@@ -2213,12 +2224,11 @@ update_command() {
     update_pasarguard_script
     uninstall_completion
     install_completion
-    colorized_echo blue "Pulling latest version"
-    update_pasarguard
-
-    colorized_echo blue "Restarting pasarguard's services"
-    down_pasarguard
-    up_pasarguard
+    colorized_echo blue "Updating to the latest owned release"
+    if ! update_pasarguard; then
+        colorized_echo red "PasarGuard update failed; previous runtime was restored."
+        exit 1
+    fi
 
     colorized_echo blue "pasarguard updated successfully"
 }
@@ -2251,9 +2261,52 @@ update_pasarguard_script() {
     colorized_echo green "pasarguard script updated successfully"
 }
 
-# Pull the latest Docker images specified in docker-compose.yml.
+# Resolve, pull, activate, and verify the latest owned Panel release.
+# The compose file is restored and the previous image restarted on failure.
 update_pasarguard() {
-    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
+    local latest_tag=""
+    local target_image=""
+    local compose_backup=""
+
+    latest_tag=$(resolve_latest_owned_panel_release) || {
+        colorized_echo red "Could not resolve the latest GamerKhaan Panel release."
+        return 1
+    }
+    target_image=$(owned_panel_image_for_version "$latest_tag")
+
+    colorized_echo blue "Resolved latest owned Panel release: $latest_tag"
+    colorized_echo blue "Pulling owned Panel image: $target_image"
+    if ! docker pull "$target_image"; then
+        colorized_echo red "Failed to pull $target_image; current Panel remains unchanged."
+        return 1
+    fi
+
+    compose_backup=$(mktemp "${COMPOSE_FILE}.update.XXXXXX") || return 1
+    cp -a "$COMPOSE_FILE" "$compose_backup"
+
+    set_pasarguard_panel_image "$target_image"
+
+    if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d; then
+        colorized_echo red "Panel update activation failed; restoring previous compose."
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d >/dev/null 2>&1 || true
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    if ! wait_for_pasarguard_health; then
+        colorized_echo red "Panel update health check failed; restoring previous compose."
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d >/dev/null 2>&1 || true
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    rm -f "$compose_backup"
+    printf 'distribution=GamerKhaan\nimage=%s\nupdated_at=%s\n' \
+        "$target_image" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$APP_DIR/.gamerkhaan-distribution"
+    chmod 644 "$APP_DIR/.gamerkhaan-distribution" 2>/dev/null || true
+    colorized_echo green "Panel updated to $latest_tag."
 }
 
 # Open the docker-compose.yml file in the configured text editor.

@@ -102,6 +102,26 @@ else
   fail "backup upload safely skips when backup service variables are absent"
 fi
 
+if declare -F resolve_latest_owned_panel_release >/dev/null 2>&1; then
+  curl() { printf '%s\n' '{"tag_name":"v5.4.1-awg31.9"}'; }
+  assert_eq "$(resolve_latest_owned_panel_release)" "v5.4.1-awg31.9" "panel update resolves latest owned release"
+else
+  fail "resolve_latest_owned_panel_release exists"
+fi
+
+UPDATE_DIR="$WORK_DIR/update-panel"
+mkdir -p "$UPDATE_DIR"
+COMPOSE_FILE="$UPDATE_DIR/docker-compose.yml"
+printf '%s\n' 'services:' '  pasarguard:' '    image: ghcr.io/gamerkhaan/panel:v5.4.1-awg31.1' >"$COMPOSE_FILE"
+APP_NAME="update-panel"
+docker() { [ "${1:-}" = "pull" ] && [ "${2:-}" = "ghcr.io/gamerkhaan/panel:v5.4.1-awg31.9" ]; }
+set_pasarguard_panel_image() { sed -i "s#image: .*#image: $1#" "$COMPOSE_FILE"; }
+compose_mock() { return 0; }
+COMPOSE="compose_mock"
+wait_for_pasarguard_health() { return 0; }
+if update_pasarguard; then pass "panel update switches to latest owned release"; else fail "panel update switches to latest owned release"; fi
+assert_true "panel update writes latest owned image" grep -Fq 'image: ghcr.io/gamerkhaan/panel:v5.4.1-awg31.9' "$COMPOSE_FILE"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
