@@ -27,7 +27,7 @@ echo "=== unit_fork_adoption.sh ==="
 
 if declare -F owned_panel_image_for_version >/dev/null 2>&1; then
   assert_eq "$(owned_panel_image_for_version latest)" "ghcr.io/gamerkhaan/panel:latest" "latest resolves owned image"
-  assert_eq "$(owned_panel_image_for_version v5.4.1-awg31.1)" "ghcr.io/gamerkhaan/panel:v5.4.1-awg31.1" "version resolves owned image"
+  assert_eq "$(owned_panel_image_for_version v1.0.0)" "ghcr.io/gamerkhaan/panel:v1.0.0" "v1 distribution release resolves owned image"
 else
   fail "owned_panel_image_for_version exists"
 fi

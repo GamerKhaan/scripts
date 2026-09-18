@@ -27,7 +27,7 @@ echo "=== unit_fork_node_adoption.sh ==="
 
 if declare -F owned_node_image_for_version >/dev/null 2>&1; then
   assert_eq "$(owned_node_image_for_version latest)" "ghcr.io/gamerkhaan/node:latest" "latest resolves owned Node image"
-  assert_eq "$(owned_node_image_for_version v0.5.4-awg31.1)" "ghcr.io/gamerkhaan/node:v0.5.4-awg31.1" "version resolves owned Node image"
+  assert_eq "$(owned_node_image_for_version v1.0.0)" "ghcr.io/gamerkhaan/node:v1.0.0" "v1 distribution release resolves owned Node image"
 else
   fail "owned_node_image_for_version exists"
 fi
