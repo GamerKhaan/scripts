@@ -7,7 +7,7 @@
 [![Unit Tests](https://github.com/GamerKhaan/scripts/actions/workflows/command-tests.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/command-tests.yml)
 [![Backup Restore Tests](https://github.com/GamerKhaan/scripts/actions/workflows/backup-restore.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/backup-restore.yml)
 [![Script Safety](https://github.com/GamerKhaan/scripts/actions/workflows/script-update-safety.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/script-update-safety.yml)
-[![License](https://img.shields.io/github/license/PasarGuard/scripts)](LICENSE)
+[![License](https://img.shields.io/github/license/GamerKhaan/scripts)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/GamerKhaan/scripts)](https://github.com/GamerKhaan/scripts/releases)
 
 [English](README.md) • [راهنمای فارسی (Standalone)](iran-sanction/README-pasarguard-standalone.fa.md) • [راهنمای فارسی نود (Standalone)](iran-sanction/README-pg-node-standalone.fa.md)
