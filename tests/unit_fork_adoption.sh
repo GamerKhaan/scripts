@@ -88,6 +88,7 @@ else
   fail "adopt_existing_pasarguard exists"
 fi
 
+assert_true "install command resolves latest to immutable owned Panel tag" grep -Fq 'pasarguard_version=$(resolve_latest_owned_panel_release)' "$ROOT_DIR/pasarguard.sh"
 assert_true "install command dispatches existing installs to adoption"   grep -Fq 'adopt_existing_pasarguard "$pasarguard_version"' "$ROOT_DIR/pasarguard.sh"
 assert_true "install command tracks existing installation mode"   grep -Fq 'existing_install="true"' "$ROOT_DIR/pasarguard.sh"
 

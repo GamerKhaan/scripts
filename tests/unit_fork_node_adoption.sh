@@ -92,6 +92,7 @@ else
   fail "adopt_existing_node exists"
 fi
 
+assert_true "Node install resolves latest to immutable owned Node tag" grep -Fq 'node_version=$(resolve_latest_owned_node_release)' "$ROOT_DIR/pg-node.sh"
 assert_true "Node install dispatches existing installs to adoption" grep -Fq 'adopt_existing_node "$node_version"' "$ROOT_DIR/pg-node.sh"
 assert_true "Node install tracks existing installation mode" grep -Fq 'existing_install="true"' "$ROOT_DIR/pg-node.sh"
 

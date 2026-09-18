@@ -1759,6 +1759,13 @@ install_command() {
     # Check if the version is valid and exists
     if [[ "$pasarguard_version" == "latest" || "$pasarguard_version" == "dev" || "$pasarguard_version" == "pre-release" || "$pasarguard_version" =~ $semver_regex ]]; then
         if check_version_exists "$pasarguard_version"; then
+            if [ "$pasarguard_version" = "latest" ]; then
+                pasarguard_version=$(resolve_latest_owned_panel_release) || {
+                    colorized_echo red "Could not resolve the latest GamerKhaan Panel release."
+                    exit 1
+                }
+                major_version=$(echo "$pasarguard_version" | sed 's/^v//' | cut -d. -f1)
+            fi
             if [ "$existing_install" = "true" ]; then
                 if ! adopt_existing_pasarguard "$pasarguard_version"; then
                     colorized_echo red "Existing installation migration failed; previous configuration was restored."

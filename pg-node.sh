@@ -1450,6 +1450,12 @@ install_command() {
     semver_regex='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
     if [[ "$node_version" == "latest" || "$node_version" == "pre-release" || "$node_version" =~ $semver_regex ]]; then
         if check_version_exists "$node_version"; then
+            if [ "$node_version" = "latest" ]; then
+                node_version=$(resolve_latest_owned_node_release) || {
+                    colorized_echo red "Could not resolve the latest GamerKhaan Node release."
+                    exit 1
+                }
+            fi
             if [ "$existing_install" = "true" ]; then
                 colorized_echo cyan "================================"
                 colorized_echo cyan "Adopting existing PasarGuard Node"
