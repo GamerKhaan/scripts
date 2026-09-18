@@ -315,6 +315,16 @@ fi
 # -----------------------------------------------------------------------
 # pairing-export: file-only secret-safe node pairing bundle
 # -----------------------------------------------------------------------
+# CI runners are intentionally non-root; happy-path tests mock EUID 0 while
+# the dedicated root-only assertion below overrides it back to non-root.
+id() {
+    if [ "${1:-}" = "-u" ]; then
+        echo 0
+        return 0
+    fi
+    command id "$@"
+}
+
 pair_dir="$WORK_DIR/pairing"
 mkdir -p "$pair_dir"
 APP_DIR="$pair_dir/app"
@@ -380,6 +390,7 @@ if ( id() { [ "${1:-}" = "-u" ] && echo 1000 || command id "$@"; }; pairing_expo
 else
     pass "pairing-export: requires root"
 fi
+unset -f id
 
 # -----------------------------------------------------------------------
 # version-script CLI command & completions
