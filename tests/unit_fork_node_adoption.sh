@@ -95,6 +95,16 @@ fi
 assert_true "Node install dispatches existing installs to adoption" grep -Fq 'adopt_existing_node "$node_version"' "$ROOT_DIR/pg-node.sh"
 assert_true "Node install tracks existing installation mode" grep -Fq 'existing_install="true"' "$ROOT_DIR/pg-node.sh"
 
+APP_NAME="custom-existing-node"
+DATA_DIR="$WORK_DIR/custom-existing-data"
+mkdir -p "$DATA_DIR/certs"
+ENV_FILE="$WORK_DIR/custom-existing.env"
+printf '%s\n'   'SSL_CERT_FILE=/var/lib/pg-node/certs/ssl_cert.pem'   'SSL_KEY_FILE=/var/lib/pg-node/certs/ssl_key.pem'   'API_KEY=11111111-2222-4333-8444-555555555555' >"$ENV_FILE"
+PRE_DISPATCH_SHA="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
+install_command() { return 0; }
+pg_node_main install
+assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$PRE_DISPATCH_SHA" "install dispatch does not rewrite existing SSL paths before adoption backup"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

@@ -2520,8 +2520,11 @@ renew_cert_command() {
 
 # Main CLI dispatch handler for pg-node.
 pg_node_main() {
-    # Bring existing env SSL paths in line with the current APP_NAME (safe no-op if not installed/default)
-    sync_env_ssl_paths
+    # Never rewrite an existing install before the install/adoption path has
+    # created its preservation backup. Fresh install synchronizes paths later.
+    if [ "${1:-}" != "install" ]; then
+        sync_env_ssl_paths
+    fi
 
     case "$1" in
     install)
