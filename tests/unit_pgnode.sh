@@ -291,6 +291,28 @@ sync_env_ssl_paths
 pass "sync_env_ssl_paths: no crash when ENV_FILE missing"
 
 # -----------------------------------------------------------------------
+# usage/help must never disclose stored API keys
+# -----------------------------------------------------------------------
+APP_NAME="pg-node-unit-test"
+APP_DIR="$WORK_DIR/help-app"
+mkdir -p "$APP_DIR"
+ENV_FILE="$APP_DIR/.env"
+help_secret="11111111-2222-4333-8444-555555555555"
+cat > "$ENV_FILE" <<EOF
+SERVICE_PORT=12345
+API_KEY=$help_secret
+EOF
+SSL_CERT_FILE="$WORK_DIR/help-cert.pem"
+NODE_IP_V4="203.0.113.7"
+get_current_xray_core_version() { printf '%s\n' "test-xray"; }
+help_out=$(TERM=xterm usage 2>&1)
+if [[ "$help_out" == *"$help_secret"* ]]; then
+    fail "usage: stored API key is not disclosed"
+else
+    pass "usage: stored API key is not disclosed"
+fi
+
+# -----------------------------------------------------------------------
 # version-script CLI command & completions
 # -----------------------------------------------------------------------
 ver_out=$(pg_node_main version-script)

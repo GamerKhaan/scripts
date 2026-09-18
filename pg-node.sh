@@ -2392,14 +2392,11 @@ usage() {
     colorized_echo cyan "Node Information:"
     colorized_echo magenta "  Node IP: $NODE_IP_V4"
     local service_port=""
-    local api_key=""
     if [ -f "$APP_DIR/.env" ]; then
         service_port=$(grep '^SERVICE_PORT[[:space:]]*=' "$APP_DIR/.env" 2>/dev/null | sed 's/^SERVICE_PORT[[:space:]]*=[[:space:]]*//' || true)
-        api_key=$(grep '^API_KEY[[:space:]]*=' "$APP_DIR/.env" 2>/dev/null | sed 's/^API_KEY[[:space:]]*=[[:space:]]*//' || true)
     fi
     colorized_echo magenta "  Service port: $service_port"
     colorized_echo magenta "  Cert file path: $SSL_CERT_FILE"
-    colorized_echo magenta "  API Key : $api_key"
     echo
     current_version=$(get_current_xray_core_version)
     colorized_echo cyan "Current Xray-core version: " 1 # 1 for bold
