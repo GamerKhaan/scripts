@@ -2227,6 +2227,151 @@ edit_env_command() {
     fi
 }
 
+# Export the node API credential and public TLS certificate to a root-private pairing bundle.
+# The credential is read from the existing .env inside the Python helper and is
+# never passed on argv or printed to stdout/stderr.
+pairing_export_command() {
+    check_running_as_root
+
+    local output_file=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        --file)
+            [ -n "${2:-}" ] || die "pairing-export requires a path after --file."
+            output_file="$2"
+            shift 2
+            ;;
+        --file=*)
+            output_file="${1#*=}"
+            shift
+            ;;
+        *)
+            die "Unknown pairing-export option: $1"
+            ;;
+        esac
+    done
+
+    [ -n "$output_file" ] || die "pairing-export requires --file PATH."
+    [ -f "$ENV_FILE" ] || die "Node environment file not found."
+    [ -f "$SSL_CERT_FILE" ] || die "Node public certificate not found."
+    [ ! -L "$SSL_CERT_FILE" ] || die "Node public certificate path must not be a symlink."
+    command -v python3 >/dev/null 2>&1 || die "python3 is required for pairing-export."
+    command -v openssl >/dev/null 2>&1 || die "openssl is required for pairing-export."
+    openssl x509 -in "$SSL_CERT_FILE" -noout >/dev/null 2>&1 || die "Node public certificate is invalid."
+
+    local output_dir
+    output_dir=$(dirname -- "$output_file")
+    [ -d "$output_dir" ] || die "Pairing output directory does not exist."
+    if [ -e "$output_file" ] || [ -L "$output_file" ]; then
+        die "Pairing output file already exists."
+    fi
+
+    if ! python3 - "$ENV_FILE" "$SSL_CERT_FILE" "$output_file" <<'PY'
+import json
+import os
+import stat
+import sys
+import tempfile
+import uuid
+
+env_path, cert_path, output_path = sys.argv[1:4]
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_regular(path, *, max_bytes, require_private=False):
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        fail("Unable to open required node pairing source file.")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            fail("Node pairing source must be a regular file.")
+        if info.st_size > max_bytes:
+            fail("Node pairing source file is unexpectedly large.")
+        if require_private and stat.S_IMODE(info.st_mode) & 0o077:
+            fail("Node environment permissions are not private.")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            return handle.read()
+    except UnicodeDecodeError:
+        fail("Node pairing source has invalid text encoding.")
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+env_text = read_regular(env_path, max_bytes=262144, require_private=True)
+api_key = ""
+for raw_line in env_text.splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    if key.strip() == "API_KEY":
+        api_key = value.strip().strip('"').strip("'")
+        break
+
+if not api_key:
+    fail("Node API key is missing.")
+try:
+    uuid.UUID(api_key)
+except ValueError:
+    fail("Node API key is invalid.")
+
+certificate = read_regular(cert_path, max_bytes=65536)
+if "-----BEGIN CERTIFICATE-----" not in certificate or "-----END CERTIFICATE-----" not in certificate:
+    fail("Node public certificate is invalid.")
+
+output_dir = os.path.dirname(output_path) or "."
+try:
+    temp_fd, temp_path = tempfile.mkstemp(prefix=".pg-node-pairing-", dir=output_dir)
+except OSError:
+    fail("Unable to create pairing bundle.")
+
+try:
+    os.fchmod(temp_fd, 0o600)
+    payload = json.dumps(
+        {"api_key": api_key, "server_ca": certificate.strip()},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    with os.fdopen(temp_fd, "wb") as handle:
+        temp_fd = -1
+        handle.write(payload)
+        handle.write(b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.link(temp_path, output_path)
+    except FileExistsError:
+        fail("Pairing output file already exists.")
+    except OSError:
+        fail("Unable to finalize pairing bundle.")
+finally:
+    if temp_fd >= 0:
+        os.close(temp_fd)
+    try:
+        os.unlink(temp_path)
+    except OSError:
+        pass
+
+try:
+    os.chmod(output_path, 0o600)
+except OSError:
+    fail("Unable to harden pairing bundle permissions.")
+PY
+    then
+        die "Failed to export node pairing bundle."
+    fi
+
+    colorized_echo green "Pairing bundle written to: $output_file"
+}
+
 # Generate bash auto-completion definition script.
 generate_bash_completion() {
     cat <<'EOF'
@@ -2235,7 +2380,7 @@ _node_completions()
     local cur cmds
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
-    cmds="up down restart status logs install update uninstall install-script uninstall-script core-update geofiles renew-cert version-script script-version edit edit-env completion service-install service-uninstall service-restart service-status service-logs service-update service-start service-stop"
+    cmds="up down restart status logs install update uninstall install-script uninstall-script core-update geofiles renew-cert pairing-export version-script script-version edit edit-env completion service-install service-uninstall service-restart service-status service-logs service-update service-start service-stop"
     COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
     return 0
 }
@@ -2264,6 +2409,7 @@ commands=(
   core-update
   geofiles
   renew-cert
+  pairing-export
   version-script
   script-version
   edit
@@ -2357,6 +2503,7 @@ usage() {
     colorized_echo yellow "  core-update       $(tput sgr0)✓  Update/Change Xray core"
     colorized_echo yellow "  geofiles          $(tput sgr0)✓  Download geoip and geosite files for specific regions"
     colorized_echo yellow "  renew-cert        $(tput sgr0)✓  Regenerate SSL/TLS certificate"
+    colorized_echo yellow "  pairing-export    $(tput sgr0)✓  Export root-private pairing bundle to a file"
     colorized_echo yellow "  version-script    $(tput sgr0)✓  Show script version and commit"
     colorized_echo yellow "  completion        $(tput sgr0)✓  Install bash/zsh tab completion"
     echo
@@ -2384,6 +2531,8 @@ usage() {
     colorized_echo yellow "  --install-service       $(tput sgr0)✓  Install systemd service"
     colorized_echo yellow "  --no-install-service    $(tput sgr0)✓  Skip systemd service installation"
     colorized_echo yellow "  --san-entries ENTRIES   $(tput sgr0)✓  Add SAN entries (comma separated)"
+    colorized_echo cyan "Pairing Export Options:"
+    colorized_echo yellow "  --file PATH             $(tput sgr0)✓  Write a new 0600 pairing JSON file (required)"
     colorized_echo cyan "Core-update Options:"
     colorized_echo yellow "  --version VERSION       $(tput sgr0)✓  Update Xray-core to specific version (use 'latest' for newest)"
     colorized_echo cyan "Service Logs Options:"
@@ -2628,6 +2777,10 @@ pg_node_main() {
     renew-cert)
         shift
         renew_cert_command "$@"
+        ;;
+    pairing-export)
+        shift
+        pairing_export_command "$@"
         ;;
     install-script)
         install_node_script
