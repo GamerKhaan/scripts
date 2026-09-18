@@ -105,16 +105,18 @@ Download and inspect the installer on your server (or pin to an immutable releas
 
 ```bash
 # Download installer script
-curl -fsSL https://raw.githubusercontent.com/PasarGuard/scripts/main/pasarguard.sh -o pasarguard.sh
+curl -fsSL https://raw.githubusercontent.com/GamerKhaan/scripts/main/pasarguard.sh -o pasarguard.sh
 
 # Default install (SQLite, interactive SSL)
 sudo bash pasarguard.sh install
 
 # High-concurrency production install (TimescaleDB + PgBouncer)
-sudo bash pasarguard.sh install --database timescaledb --pre-release
+sudo bash pasarguard.sh install --database timescaledb
 ```
 
-*(Tip: In production environments, review the script or pin to a specific release tag, e.g. `https://raw.githubusercontent.com/PasarGuard/scripts/<tag>/pasarguard.sh`).*
+If an official PasarGuard installation already exists in `/opt/pasarguard`, the same `install` command automatically enters safe adoption mode: it backs up the existing installation and database, keeps `.env`, data, TLS files and templates, then switches only the Panel image to the GamerKhaan distribution. No separate patch command is required.
+
+*(Tip: In production environments, review the script or pin to a specific release tag, e.g. `https://raw.githubusercontent.com/GamerKhaan/scripts/<tag>/pasarguard.sh`).*
 
 Once installed, control the panel at any time using the global `pasarguard` command:
 ```bash
@@ -129,7 +131,7 @@ On each remote worker node, download and execute the node installer:
 
 ```bash
 # Download node installer script
-curl -fsSL https://raw.githubusercontent.com/PasarGuard/scripts/main/pg-node.sh -o pg-node.sh
+curl -fsSL https://raw.githubusercontent.com/GamerKhaan/scripts/main/pg-node.sh -o pg-node.sh
 
 # Standard node installation
 sudo bash pg-node.sh install
@@ -137,6 +139,8 @@ sudo bash pg-node.sh install
 # Multi-instance node with custom name
 sudo bash pg-node.sh install --name node-de1 --self-signed
 ```
+
+If an official PasarGuard Node already exists, the same command safely adopts it in place while preserving the existing API key, TLS files, ports and data directory.
 
 Once installed, manage the node using the global `pg-node` command:
 ```bash
