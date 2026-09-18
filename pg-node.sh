@@ -5,6 +5,10 @@ SCRIPT_COMMIT_SHA="${SCRIPT_COMMIT_SHA:-__SCRIPT_COMMIT_SHA__}"
 SCRIPT_DIR="${PG_NODE_SCRIPT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
 SHARED_LIB_DIR="${SCRIPT_DIR}/lib"
 REQUIRED_SHARED_LIBS="common.sh system.sh docker.sh github.sh"
+DISTRIBUTION_SCRIPTS_REPO="GamerKhaan/scripts"
+DISTRIBUTION_NODE_REPO="GamerKhaan/node"
+DISTRIBUTION_NODE_IMAGE="ghcr.io/gamerkhaan/node"
+DISTRIBUTION_NODE_SERVICE_REPO="GamerKhaan/node-serviced"
 # Running from a local checkout/bundle (libs sit next to this script) vs. an
 # installed copy (libs live under /usr/local/lib). Only the installed copy is
 # auto-refreshed below; a checkout's libs are used as-is.
@@ -19,7 +23,7 @@ fi
 # succeeds, so a partial/failed refresh never leaves a half-updated set and any
 # existing copy is preserved on failure.
 bootstrap_pg_node_shared_libs() {
-    local fetch_repo="PasarGuard/scripts"
+    local fetch_repo="$DISTRIBUTION_SCRIPTS_REPO"
     local bootstrap_dir="/usr/local/lib/pasarguard-scripts/lib"
     local tmp_dir=""
     local shared_lib=""
@@ -165,8 +169,8 @@ ENV_FILE="$APP_DIR/.env"
 SSL_CERT_FILE="$DATA_DIR/certs/ssl_cert.pem"
 SSL_KEY_FILE="$DATA_DIR/certs/ssl_key.pem"
 LAST_XRAY_CORES=5
-FETCH_REPO="PasarGuard/scripts"
-NODE_SERVICE_REPO="PasarGuard/node-serviced"
+FETCH_REPO="$DISTRIBUTION_SCRIPTS_REPO"
+NODE_SERVICE_REPO="$DISTRIBUTION_NODE_SERVICE_REPO"
 NODE_SERVICE_RELEASE_API="https://api.github.com/repos/${NODE_SERVICE_REPO}/releases/latest"
 NODE_SERVICE_BINARY_NAME="node-serviced"
 # Configure service paths based on APP_NAME.
@@ -714,8 +718,8 @@ read_and_save_file() {
 # Download compose files, set up certificates, configure .env, and deploy the node.
 install_node() {
     local node_version=$1
-    FILES_URL_PREFIX="https://raw.githubusercontent.com/PasarGuard/node/main"
-    COMPOSE_FILES_URL_PREFIX="https://raw.githubusercontent.com/PasarGuard/scripts/main/docker-compose"
+    FILES_URL_PREFIX="https://raw.githubusercontent.com/${DISTRIBUTION_NODE_REPO}/main"
+    COMPOSE_FILES_URL_PREFIX="https://raw.githubusercontent.com/${DISTRIBUTION_SCRIPTS_REPO}/main/docker-compose"
     colorized_echo blue "Creating directories..."
     colorized_echo cyan "  Command: mkdir -p $DATA_DIR $DATA_DIR/certs $APP_DIR"
     mkdir -p "$DATA_DIR"
@@ -1181,7 +1185,7 @@ install_command() {
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
         local version=$1
-        repo_url="https://api.github.com/repos/PasarGuard/node/releases"
+        repo_url="https://api.github.com/repos/${DISTRIBUTION_NODE_REPO}/releases"
         if [ "$version" == "latest" ]; then
             latest_tag=$(curl -s ${repo_url}/latest | jq -r '.tag_name')
             # Check if there is any stable release of  node v1

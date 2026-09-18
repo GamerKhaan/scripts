@@ -5,6 +5,11 @@ SCRIPT_COMMIT_SHA="${SCRIPT_COMMIT_SHA:-__SCRIPT_COMMIT_SHA__}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SHARED_LIB_DIR="${SCRIPT_DIR}/lib"
 REQUIRED_SHARED_LIBS="common.sh system.sh docker.sh github.sh env.sh pasarguard-backup.sh pasarguard-restore.sh"
+DISTRIBUTION_SCRIPTS_REPO="GamerKhaan/scripts"
+DISTRIBUTION_PANEL_REPO="GamerKhaan/panel"
+DISTRIBUTION_PANEL_IMAGE="ghcr.io/gamerkhaan/panel"
+DISTRIBUTION_NODE_REPO="GamerKhaan/node"
+DISTRIBUTION_NODE_IMAGE="ghcr.io/gamerkhaan/node"
 # Running from a local checkout/bundle (libs sit next to this script) vs. an
 # installed copy (libs live under /usr/local/lib). Only the installed copy is
 # auto-refreshed below; a checkout's libs are used as-is.
@@ -19,7 +24,7 @@ fi
 # succeeds, so a partial/failed refresh never leaves a half-updated set and any
 # existing copy is preserved on failure.
 bootstrap_pasarguard_shared_libs() {
-    local fetch_repo="PasarGuard/scripts"
+    local fetch_repo="$DISTRIBUTION_SCRIPTS_REPO"
     local bootstrap_dir="/usr/local/lib/pasarguard-scripts/lib"
     local tmp_dir=""
     local shared_lib=""
@@ -1076,7 +1081,7 @@ verify_and_start_container() {
 #   0 on successful installation.
 install_pasarguard_script() {
     print_script_execution_header "pasarguard" "$SCRIPT_COMMIT_SHA" "install"
-    FETCH_REPO="PasarGuard/scripts"
+    FETCH_REPO="$DISTRIBUTION_SCRIPTS_REPO"
     colorized_echo blue "Installing pasarguard script"
     install_shared_libs_from_repo "$FETCH_REPO" common.sh system.sh docker.sh github.sh env.sh pasarguard-backup.sh pasarguard-restore.sh
     github_install_script_from_repo "$FETCH_REPO" "pasarguard.sh" "pasarguard"
@@ -1106,7 +1111,7 @@ set_pasarguard_panel_image() {
     while IFS= read -r service_name; do
         [ -z "$service_name" ] && continue
         image_name=$(yq eval -r ".services.\"${service_name}\".image // \"\"" "$COMPOSE_FILE" 2>/dev/null)
-        if [[ "$image_name" =~ ^pasarguard/panel([:@].*)?$ ]]; then
+        if [[ "$image_name" =~ ^(pasarguard/panel|ghcr.io/gamerkhaan/panel)([:@].*)?$ ]]; then
             yq -i ".services.\"${service_name}\".image = \"${target_image}\"" "$COMPOSE_FILE"
             updated_any=true
         fi
@@ -1136,8 +1141,8 @@ install_pasarguard() {
     local major_version=$2
     local database_type=$3
 
-    FILES_URL_PREFIX="https://raw.githubusercontent.com/pasarguard/panel"
-    COMPOSE_FILES_URL_PREFIX="https://raw.githubusercontent.com/pasarguard/scripts/main/docker-compose"
+    FILES_URL_PREFIX="https://raw.githubusercontent.com/${DISTRIBUTION_PANEL_REPO}"
+    COMPOSE_FILES_URL_PREFIX="https://raw.githubusercontent.com/${DISTRIBUTION_SCRIPTS_REPO}/main/docker-compose"
 
     mkdir -p "$DATA_DIR"
     mkdir -p "$APP_DIR"
@@ -1233,9 +1238,9 @@ install_pasarguard() {
     fi
 
     # Install requested version
-    local target_image="pasarguard/panel:${pasarguard_version}"
+    local target_image="${DISTRIBUTION_PANEL_IMAGE}:${pasarguard_version}"
     if [ "$pasarguard_version" == "latest" ]; then
-        target_image="pasarguard/panel:latest"
+        target_image="${DISTRIBUTION_PANEL_IMAGE}:latest"
     fi
     set_pasarguard_panel_image "$target_image"
     colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
@@ -1553,7 +1558,7 @@ install_command() {
     #   0 if valid or accessible, 1 otherwise.
     check_version_exists() {
         local version=$1
-        repo_url="https://api.github.com/repos/pasarguard/panel/releases"
+        repo_url="https://api.github.com/repos/${DISTRIBUTION_PANEL_REPO}/releases"
 
         if [[ "$version" == "latest" || "$version" == "pre-release" || "$version" == "dev" ]]; then
             local latest_tag
@@ -2051,7 +2056,7 @@ update_command() {
 # Returns:
 #   0 on success; exits with code 1 on failure after restoring backup.
 update_pasarguard_script() {
-    FETCH_REPO="PasarGuard/scripts"
+    FETCH_REPO="$DISTRIBUTION_SCRIPTS_REPO"
     colorized_echo blue "Updating pasarguard script"
 
     local backup_dir
@@ -2119,10 +2124,10 @@ install_node_command() {
 
     if [ "$(id -u)" = "0" ]; then
         colorized_echo blue "Running node installation as root..."
-        bash -c "$(curl -sL https://github.com/PasarGuard/scripts/raw/main/pg-node.sh)" @ install
+        bash -c "$(curl -sL https://github.com/${DISTRIBUTION_SCRIPTS_REPO}/raw/main/pg-node.sh)" @ install
     else
         colorized_echo blue "Running node installation with sudo..."
-        sudo bash -c "$(curl -sL https://github.com/PasarGuard/scripts/raw/main/pg-node.sh)" @ install
+        sudo bash -c "$(curl -sL https://github.com/${DISTRIBUTION_SCRIPTS_REPO}/raw/main/pg-node.sh)" @ install
     fi
 
     if [ $? -eq 0 ]; then

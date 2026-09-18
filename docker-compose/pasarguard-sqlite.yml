@@ -1,6 +1,6 @@
 services:
   pasarguard:
-    image: pasarguard/panel:latest
+    image: ghcr.io/gamerkhaan/panel:latest
     restart: always
     env_file: .env
     network_mode: host

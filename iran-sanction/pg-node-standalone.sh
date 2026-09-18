@@ -584,7 +584,7 @@ install_command() {
     #   0 if valid/exists or unreachable, 1 if version does not exist.
     check_version_exists() {
         local version="$1"
-        local repo_url="https://api.github.com/repos/PasarGuard/node/releases"
+        local repo_url="https://api.github.com/repos/GamerKhaan/node/releases"
         
         # In standalone mode, we trust 'latest' and 'pre-release' and 'dev' without checking GitHub
         if [[ "$version" == "latest" || "$version" == "pre-release" || "$version" == "dev" ]]; then
