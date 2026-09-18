@@ -313,6 +313,75 @@ else
 fi
 
 # -----------------------------------------------------------------------
+# pairing-export: file-only secret-safe node pairing bundle
+# -----------------------------------------------------------------------
+pair_dir="$WORK_DIR/pairing"
+mkdir -p "$pair_dir"
+APP_DIR="$pair_dir/app"
+DATA_DIR="$pair_dir/data"
+ENV_FILE="$APP_DIR/.env"
+SSL_CERT_FILE="$DATA_DIR/certs/ssl_cert.pem"
+mkdir -p "$APP_DIR" "$(dirname "$SSL_CERT_FILE")"
+pair_secret="22222222-3333-4444-8555-666666666666"
+cat >"$ENV_FILE" <<EOF
+API_KEY= $pair_secret
+EOF
+chmod 600 "$ENV_FILE"
+openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$pair_dir/pairing-test.key" \
+    -out "$SSL_CERT_FILE" -days 1 -subj "/CN=pairing.test" >/dev/null 2>&1
+
+pair_file="$pair_dir/node-pairing.json"
+pair_out=$(pairing_export_command --file "$pair_file" 2>&1)
+assert_true "pairing-export: creates output file" test -f "$pair_file"
+assert_eq "$(stat -c '%a' "$pair_file")" "600" "pairing-export: output file is 0600"
+if grep -q "$pair_secret" "$pair_file" && grep -q "BEGIN CERTIFICATE" "$pair_file"; then
+    pass "pairing-export: writes API key and public certificate to bundle"
+else
+    fail "pairing-export: writes API key and public certificate to bundle"
+fi
+if [[ "$pair_out" == *"$pair_secret"* || "$pair_out" == *"BEGIN CERTIFICATE"* ]]; then
+    fail "pairing-export: stdout does not disclose pairing credentials"
+else
+    pass "pairing-export: stdout does not disclose pairing credentials"
+fi
+
+dispatch_pair="$pair_dir/node-pairing-dispatch.json"
+APP_NAME="pg-node"
+dispatch_out=$(pg_node_main pairing-export --file "$dispatch_pair" 2>&1)
+assert_true "pairing-export: main dispatch creates bundle" test -f "$dispatch_pair"
+if [[ "$dispatch_out" == *"$pair_secret"* || "$dispatch_out" == *"BEGIN CERTIFICATE"* ]]; then
+    fail "pairing-export: dispatch output does not disclose credentials"
+else
+    pass "pairing-export: dispatch output does not disclose credentials"
+fi
+
+existing_pair="$pair_dir/existing.json"
+printf '%s\n' "sentinel" >"$existing_pair"
+if ( pairing_export_command --file "$existing_pair" >/dev/null 2>&1 ); then
+    fail "pairing-export: refuses to overwrite existing file"
+else
+    assert_eq "$(cat "$existing_pair")" "sentinel" "pairing-export: preserves existing file"
+fi
+
+symlink_target="$pair_dir/target.json"
+printf '%s\n' "sentinel-target" >"$symlink_target"
+symlink_pair="$pair_dir/symlink.json"
+ln -s "$symlink_target" "$symlink_pair"
+if ( pairing_export_command --file "$symlink_pair" >/dev/null 2>&1 ); then
+    fail "pairing-export: rejects symlink output"
+else
+    assert_eq "$(cat "$symlink_target")" "sentinel-target" "pairing-export: symlink target preserved"
+fi
+
+nonroot_pair="$pair_dir/nonroot.json"
+if ( id() { [ "${1:-}" = "-u" ] && echo 1000 || command id "$@"; }; pairing_export_command --file "$nonroot_pair" >/dev/null 2>&1 ); then
+    fail "pairing-export: requires root"
+else
+    pass "pairing-export: requires root"
+fi
+
+# -----------------------------------------------------------------------
 # version-script CLI command & completions
 # -----------------------------------------------------------------------
 ver_out=$(pg_node_main version-script)
@@ -323,17 +392,17 @@ else
 fi
 
 bash_comp_out=$(generate_bash_completion)
-if [[ "$bash_comp_out" == *"version-script"* && "$bash_comp_out" == *"script-version"* ]]; then
-    pass "bash completion: contains version-script and script-version"
+if [[ "$bash_comp_out" == *"version-script"* && "$bash_comp_out" == *"script-version"* && "$bash_comp_out" == *"pairing-export"* ]]; then
+    pass "bash completion: contains version aliases and pairing-export"
 else
-    fail "bash completion: contains version-script and script-version"
+    fail "bash completion: contains version aliases and pairing-export"
 fi
 
 zsh_comp_out=$(generate_zsh_completion)
-if [[ "$zsh_comp_out" == *"version-script"* && "$zsh_comp_out" == *"script-version"* ]]; then
-    pass "zsh completion: contains version-script and script-version"
+if [[ "$zsh_comp_out" == *"version-script"* && "$zsh_comp_out" == *"script-version"* && "$zsh_comp_out" == *"pairing-export"* ]]; then
+    pass "zsh completion: contains version aliases and pairing-export"
 else
-    fail "zsh completion: contains version-script and script-version"
+    fail "zsh completion: contains version aliases and pairing-export"
 fi
 
 echo ""
