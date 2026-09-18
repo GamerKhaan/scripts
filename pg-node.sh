@@ -1058,6 +1058,182 @@ sync_env_ssl_paths() {
     fi
 }
 
+
+# Resolve the owned Node image for a release selector/tag.
+owned_node_image_for_version() {
+    local version="${1:-latest}"
+    printf '%s:%s\n' "$DISTRIBUTION_NODE_IMAGE" "$version"
+}
+
+# Classify an existing Node compose file without executing it.
+# Outputs: upstream, owned, or unknown.
+detect_existing_node_distribution() {
+    local compose_path="${1:-$COMPOSE_FILE}"
+    local image=""
+
+    [ -f "$compose_path" ] || {
+        printf '%s\n' "unknown"
+        return 0
+    }
+
+    image=$(awk '$1 == "image:" {print $2; exit}' "$compose_path" 2>/dev/null || true)
+    image="${image%\"}"
+    image="${image#\"}"
+    image="${image%\'}"
+    image="${image#\'}"
+
+    case "$image" in
+        ghcr.io/gamerkhaan/node|ghcr.io/gamerkhaan/node:*)
+            printf '%s\n' "owned"
+            ;;
+        pasarguard/node|pasarguard/node:*|ghcr.io/pasarguard/node|ghcr.io/pasarguard/node:*)
+            printf '%s\n' "upstream"
+            ;;
+        *)
+            printf '%s\n' "unknown"
+            ;;
+    esac
+}
+
+# Persist root-private Node configuration and TLS material before adoption.
+create_node_adoption_config_backup() {
+    local timestamp
+    local backup_dir
+
+    timestamp=$(date +"%Y%m%d%H%M%S")
+    backup_dir="$APP_DIR/migration-backups/$timestamp"
+    mkdir -p "$backup_dir"
+    chmod 700 "$APP_DIR/migration-backups" "$backup_dir" 2>/dev/null || true
+
+    cp -a "$COMPOSE_FILE" "$backup_dir/docker-compose.yml"
+    cp -a "$ENV_FILE" "$backup_dir/.env"
+    chmod 600 "$backup_dir/.env" 2>/dev/null || true
+
+    if [ -d "$DATA_DIR/certs" ]; then
+        cp -a "$DATA_DIR/certs" "$backup_dir/certs"
+        chmod -R go-rwx "$backup_dir/certs" 2>/dev/null || true
+    fi
+
+    printf '%s\n' "$backup_dir"
+}
+
+# Update only the node service image while keeping all other compose settings.
+set_owned_node_image() {
+    local target_image="$1"
+
+    if ! yq eval -e '.services.node' "$COMPOSE_FILE" >/dev/null 2>&1; then
+        colorized_echo red "Node service was not found in $COMPOSE_FILE"
+        return 1
+    fi
+
+    yq -i ".services.node.image = \"${target_image}\"" "$COMPOSE_FILE"
+}
+
+# Verify that the adopted Node container is actually running and not unhealthy.
+wait_for_node_health() {
+    local attempt
+    local container_id=""
+    local state=""
+
+    for attempt in $(seq 1 60); do
+        container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q node 2>/dev/null || true)
+        if [ -n "$container_id" ]; then
+            state=$(docker inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container_id" 2>/dev/null || true)
+            case "$state" in
+                true\| | true\|healthy)
+                    return 0
+                    ;;
+                true\|starting)
+                    ;;
+                false\|* | true\|unhealthy)
+                    return 1
+                    ;;
+            esac
+        fi
+        sleep 2
+    done
+
+    return 1
+}
+
+# Adopt an existing official Node into the GamerKhaan distribution without
+# regenerating API keys, TLS material, service ports, data, or other services.
+adopt_existing_node() {
+    local version="${1:-latest}"
+    local distribution=""
+    local target_image=""
+    local backup_dir=""
+    local env_sha_before=""
+    local env_sha_after=""
+
+    if [ ! -f "$COMPOSE_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+        colorized_echo red "Existing Node is missing docker-compose.yml or .env; refusing migration."
+        return 1
+    fi
+
+    distribution=$(detect_existing_node_distribution "$COMPOSE_FILE")
+    if [ "$distribution" = "unknown" ]; then
+        colorized_echo red "Existing Node image is not an official PasarGuard image or GamerKhaan image; refusing migration."
+        return 1
+    fi
+
+    target_image=$(owned_node_image_for_version "$version")
+    env_sha_before=$(sha256sum "$ENV_FILE" | awk '{print $1}')
+
+    colorized_echo blue "Creating pre-migration Node configuration backup..."
+    backup_dir=$(create_node_adoption_config_backup) || return 1
+
+    colorized_echo blue "Pulling owned Node image: $target_image"
+    if ! docker pull "$target_image"; then
+        colorized_echo red "Could not pull owned Node image; existing Node is unchanged."
+        return 1
+    fi
+
+    rollback_node_adoption() {
+        cp -a "$backup_dir/docker-compose.yml" "$COMPOSE_FILE"
+        cp -a "$backup_dir/.env" "$ENV_FILE"
+        chmod 600 "$ENV_FILE" 2>/dev/null || true
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d node >/dev/null 2>&1 || true
+    }
+
+    if ! set_owned_node_image "$target_image"; then
+        rollback_node_adoption
+        unset -f rollback_node_adoption
+        return 1
+    fi
+
+    if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d node; then
+        colorized_echo red "Owned Node activation failed; restoring previous compose/config."
+        rollback_node_adoption
+        unset -f rollback_node_adoption
+        return 1
+    fi
+
+    if ! wait_for_node_health; then
+        colorized_echo red "Owned Node health check failed; restoring previous compose/config."
+        rollback_node_adoption
+        unset -f rollback_node_adoption
+        return 1
+    fi
+
+    env_sha_after=$(sha256sum "$ENV_FILE" | awk '{print $1}')
+    if [ "$env_sha_after" != "$env_sha_before" ]; then
+        colorized_echo red "Node .env changed unexpectedly during adoption; restoring previous compose/config."
+        rollback_node_adoption
+        unset -f rollback_node_adoption
+        return 1
+    fi
+
+    unset -f rollback_node_adoption
+    printf 'distribution=GamerKhaan\nimage=%s\nadopted_at=%s\n' \
+        "$target_image" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$APP_DIR/.gamerkhaan-distribution"
+    chmod 644 "$APP_DIR/.gamerkhaan-distribution" 2>/dev/null || true
+
+    colorized_echo green "Existing PasarGuard Node migrated to GamerKhaan distribution."
+    colorized_echo green "API key, TLS, ports, data directory, and other services were preserved."
+    colorized_echo cyan "Migration config backup: $backup_dir"
+    return 0
+}
 # Check if node Docker containers are created or running.
 is_node_up() {
     if [ -z "$($COMPOSE -f $COMPOSE_FILE ps -q -a)" ]; then
@@ -1074,6 +1250,7 @@ install_command() {
     # Default values
     node_version="latest"
     node_version_set="false"
+    existing_install="false"
     # Parse options
     while [[ $# -gt 0 ]]; do
         key="$1"
@@ -1154,18 +1331,12 @@ install_command() {
             ;;
         esac
     done
-    # Check if  node is already installed
+    # Existing nodes are adopted in-place. Do not regenerate API keys,
+    # certificates, ports, data, or service configuration.
     if is_node_installed; then
-        colorized_echo red "node is already installed at $APP_DIR"
-        if [ "${INSTALL_OVERRIDE:-false}" = true ] || [ "$AUTO_CONFIRM" = true ]; then
-            REPLY="y"
-        else
-            read -p "Do you want to override the previous installation? (y/n) "
-        fi
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            colorized_echo red "Aborted installation"
-            exit 1
-        fi
+        existing_install="true"
+        colorized_echo cyan "Existing PasarGuard Node detected at $APP_DIR"
+        colorized_echo cyan "Install will use safe adoption mode and preserve existing Node configuration."
     fi
     detect_os
     if ! command -v jq >/dev/null 2>&1; then
@@ -1221,6 +1392,21 @@ install_command() {
     semver_regex='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
     if [[ "$node_version" == "latest" || "$node_version" == "pre-release" || "$node_version" =~ $semver_regex ]]; then
         if check_version_exists "$node_version"; then
+            if [ "$existing_install" = "true" ]; then
+                colorized_echo cyan "================================"
+                colorized_echo cyan "Adopting existing PasarGuard Node"
+                colorized_echo cyan "Version: $node_version"
+                colorized_echo cyan "================================"
+                if ! adopt_existing_node "$node_version"; then
+                    colorized_echo red "Existing Node migration failed; previous configuration was restored."
+                    exit 1
+                fi
+                install_node_script
+                install_completion
+                restart_service_if_installed
+                return 0
+            fi
+
             colorized_echo cyan "================================"
             colorized_echo cyan "Installing PasarGuard Node"
             colorized_echo cyan "Version: $node_version"

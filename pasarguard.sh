@@ -1131,6 +1131,166 @@ set_pasarguard_panel_image() {
     fi
 }
 
+
+# Resolve the owned Panel image for a release selector/tag.
+owned_panel_image_for_version() {
+    local version="${1:-latest}"
+    printf '%s:%s\n' "$DISTRIBUTION_PANEL_IMAGE" "$version"
+}
+
+# Classify an existing Panel compose file without executing it.
+# Outputs: upstream, owned, or unknown.
+detect_existing_panel_distribution() {
+    local compose_path="${1:-$COMPOSE_FILE}"
+    local image=""
+
+    [ -f "$compose_path" ] || {
+        printf '%s\n' "unknown"
+        return 0
+    }
+
+    image=$(awk '$1 == "image:" {print $2; exit}' "$compose_path" 2>/dev/null || true)
+    image="${image%\"}"
+    image="${image#\"}"
+    image="${image%\'}"
+    image="${image#\'}"
+
+    case "$image" in
+        ghcr.io/gamerkhaan/panel|ghcr.io/gamerkhaan/panel:*)
+            printf '%s\n' "owned"
+            ;;
+        pasarguard/panel|pasarguard/panel:*|ghcr.io/pasarguard/panel|ghcr.io/pasarguard/panel:*)
+            printf '%s\n' "upstream"
+            ;;
+        *)
+            printf '%s\n' "unknown"
+            ;;
+    esac
+}
+
+# Persist a local, root-private copy of configuration before stock->fork adoption.
+# The full database/data backup is handled independently by backup_command().
+create_pasarguard_adoption_config_backup() {
+    local timestamp
+    local backup_dir
+
+    timestamp=$(date +"%Y%m%d%H%M%S")
+    backup_dir="$APP_DIR/migration-backups/$timestamp"
+    mkdir -p "$backup_dir"
+    chmod 700 "$APP_DIR/migration-backups" "$backup_dir" 2>/dev/null || true
+
+    cp -a "$COMPOSE_FILE" "$backup_dir/docker-compose.yml"
+    cp -a "$ENV_FILE" "$backup_dir/.env"
+    chmod 600 "$backup_dir/.env" 2>/dev/null || true
+
+    printf '%s\n' "$backup_dir"
+}
+
+# Wait for the existing Panel endpoint to return an HTTP response after adoption.
+wait_for_pasarguard_health() {
+    local port="8000"
+    local scheme="http"
+    local attempt
+    local configured_port=""
+
+    if [ -f "$ENV_FILE" ]; then
+        configured_port=$(grep -E '^[[:space:]]*UVICORN_PORT[[:space:]]*=' "$ENV_FILE" 2>/dev/null \
+            | head -1 | sed 's/^[^=]*=[[:space:]]*//' | tr -d '[:space:]"' || true)
+        [ -n "$configured_port" ] && port="$configured_port"
+        if grep -Eq '^[[:space:]]*UVICORN_SSL_(CERTFILE|KEYFILE)[[:space:]]*=[[:space:]]*[^#[:space:]]+' "$ENV_FILE" 2>/dev/null; then
+            scheme="https"
+        fi
+    fi
+
+    for attempt in $(seq 1 60); do
+        if curl -kfsS --max-time 3 "$scheme://127.0.0.1:$port/" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    return 1
+}
+
+# Adopt an existing official PasarGuard installation into the GamerKhaan
+# distribution without replacing .env, database volumes, data, TLS, or templates.
+adopt_existing_pasarguard() {
+    local version="${1:-latest}"
+    local distribution=""
+    local target_image=""
+    local backup_dir=""
+    local env_sha_before=""
+    local env_sha_after=""
+
+    if [ ! -f "$COMPOSE_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+        colorized_echo red "Existing installation is missing docker-compose.yml or .env; refusing migration."
+        return 1
+    fi
+
+    distribution=$(detect_existing_panel_distribution "$COMPOSE_FILE")
+    if [ "$distribution" = "unknown" ]; then
+        colorized_echo red "Existing Panel image is not an official PasarGuard image or GamerKhaan image; refusing migration."
+        return 1
+    fi
+
+    target_image=$(owned_panel_image_for_version "$version")
+    env_sha_before=$(sha256sum "$ENV_FILE" | awk '{print $1}')
+
+    colorized_echo blue "Creating verified pre-migration backup..."
+    backup_dir=$(create_pasarguard_adoption_config_backup) || return 1
+    if ! backup_command; then
+        colorized_echo red "Backup failed; migration was not started."
+        return 1
+    fi
+
+    colorized_echo blue "Pulling owned Panel image: $target_image"
+    if ! docker pull "$target_image"; then
+        colorized_echo red "Could not pull owned Panel image; existing installation is unchanged."
+        return 1
+    fi
+
+    rollback_pasarguard_adoption() {
+        cp -a "$backup_dir/docker-compose.yml" "$COMPOSE_FILE"
+        cp -a "$backup_dir/.env" "$ENV_FILE"
+        chmod 600 "$ENV_FILE" 2>/dev/null || true
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d >/dev/null 2>&1 || true
+    }
+
+    set_pasarguard_panel_image "$target_image"
+
+    if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d; then
+        colorized_echo red "Owned Panel activation failed; restoring previous compose/config."
+        rollback_pasarguard_adoption
+        unset -f rollback_pasarguard_adoption
+        return 1
+    fi
+
+    if ! wait_for_pasarguard_health; then
+        colorized_echo red "Owned Panel health check failed; restoring previous compose/config."
+        rollback_pasarguard_adoption
+        unset -f rollback_pasarguard_adoption
+        return 1
+    fi
+
+    env_sha_after=$(sha256sum "$ENV_FILE" | awk '{print $1}')
+    if [ "$env_sha_after" != "$env_sha_before" ]; then
+        colorized_echo red ".env changed unexpectedly during adoption; restoring previous compose/config."
+        rollback_pasarguard_adoption
+        unset -f rollback_pasarguard_adoption
+        return 1
+    fi
+
+    unset -f rollback_pasarguard_adoption
+    printf 'distribution=GamerKhaan\nimage=%s\nadopted_at=%s\n' \
+        "$target_image" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$APP_DIR/.gamerkhaan-distribution"
+    chmod 644 "$APP_DIR/.gamerkhaan-distribution" 2>/dev/null || true
+
+    colorized_echo green "Existing PasarGuard installation migrated to GamerKhaan distribution."
+    colorized_echo green "Database, .env, data directory, TLS files, and templates were preserved."
+    colorized_echo cyan "Migration config backup: $backup_dir"
+    return 0
+}
+
 # Download template files, configure database, and set image tag for PasarGuard installation.
 # Arguments:
 #   $1 - Version string.
@@ -1434,6 +1594,7 @@ install_command() {
     ssl_mode="auto"
     ssl_domain=""
     ssl_http_port="80"
+    existing_install="false"
 
     # Parse options
     while [[ $# -gt 0 ]]; do
@@ -1526,14 +1687,12 @@ install_command() {
         esac
     done
 
-    # Check if pasarguard is already installed
+    # Existing installations are adopted in-place. Their .env, database,
+    # data directory, TLS material, and custom templates must not be regenerated.
     if is_pasarguard_installed; then
-        colorized_echo red "pasarguard is already installed at $APP_DIR"
-        read -p "Do you want to override the previous installation? (y/n) "
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            colorized_echo red "Aborted installation"
-            exit 1
-        fi
+        existing_install="true"
+        colorized_echo cyan "Existing PasarGuard installation detected at $APP_DIR"
+        colorized_echo cyan "Install will use safe adoption mode and preserve existing data/configuration."
     fi
     detect_os
     if ! command -v jq >/dev/null 2>&1; then
@@ -1550,7 +1709,9 @@ install_command() {
         install_yq
     fi
     detect_compose
-    install_pasarguard_script
+    if [ "$existing_install" != "true" ]; then
+        install_pasarguard_script
+    fi
     # Check if a release version exists in GitHub releases and extract major version.
     # Arguments:
     #   $1 - Version tag or alias to check.
@@ -1587,6 +1748,16 @@ install_command() {
     # Check if the version is valid and exists
     if [[ "$pasarguard_version" == "latest" || "$pasarguard_version" == "dev" || "$pasarguard_version" == "pre-release" || "$pasarguard_version" =~ $semver_regex ]]; then
         if check_version_exists "$pasarguard_version"; then
+            if [ "$existing_install" = "true" ]; then
+                if ! adopt_existing_pasarguard "$pasarguard_version"; then
+                    colorized_echo red "Existing installation migration failed; previous configuration was restored."
+                    exit 1
+                fi
+                install_pasarguard_script
+                install_completion
+                return 0
+            fi
+
             if [[ "$database_type" =~ ^(postgresql|timescaledb)$ ]] && [ "$major_version" -lt 1 ]; then
                 colorized_echo red "Error: --database $database_type requires v1.0.0 or newer."
                 colorized_echo yellow "Try: --pre-release or --version v1.x.y"

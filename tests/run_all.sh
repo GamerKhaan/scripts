@@ -17,6 +17,8 @@ SUITES=(
     "unit_restore_archive_safety.sh"
     "test_script_update_safety.sh"
     "unit_fork_distribution.sh"
+    "unit_fork_adoption.sh"
+    "unit_fork_node_adoption.sh"
 )
 
 TOTAL=${#SUITES[@]}
