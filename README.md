@@ -4,11 +4,11 @@
 
 **Modern deployment, orchestration, and disaster recovery suite for PasarGuard Panel and Nodes.**
 
-[![Unit Tests](https://github.com/PasarGuard/scripts/actions/workflows/command-tests.yml/badge.svg)](https://github.com/PasarGuard/scripts/actions/workflows/command-tests.yml)
-[![Backup Restore Tests](https://github.com/PasarGuard/scripts/actions/workflows/backup-restore.yml/badge.svg)](https://github.com/PasarGuard/scripts/actions/workflows/backup-restore.yml)
-[![Script Safety](https://github.com/PasarGuard/scripts/actions/workflows/script-update-safety.yml/badge.svg)](https://github.com/PasarGuard/scripts/actions/workflows/script-update-safety.yml)
+[![Unit Tests](https://github.com/GamerKhaan/scripts/actions/workflows/command-tests.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/command-tests.yml)
+[![Backup Restore Tests](https://github.com/GamerKhaan/scripts/actions/workflows/backup-restore.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/backup-restore.yml)
+[![Script Safety](https://github.com/GamerKhaan/scripts/actions/workflows/script-update-safety.yml/badge.svg)](https://github.com/GamerKhaan/scripts/actions/workflows/script-update-safety.yml)
 [![License](https://img.shields.io/github/license/PasarGuard/scripts)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/PasarGuard/scripts)](https://github.com/PasarGuard/scripts/releases)
+[![Release](https://img.shields.io/github/v/release/GamerKhaan/scripts)](https://github.com/GamerKhaan/scripts/releases)
 
 [English](README.md) • [راهنمای فارسی (Standalone)](iran-sanction/README-pasarguard-standalone.fa.md) • [راهنمای فارسی نود (Standalone)](iran-sanction/README-pg-node-standalone.fa.md)
 
@@ -264,8 +264,8 @@ PasarGuard provides 4 SSL operational modes:
 For servers operating under Iranian network sanctions and international filtering:
 - **`mirror.sh` Benchmark Suite**: Measures latency and throughput against domestic Debian, Ubuntu, and Docker Registry mirrors (ArvanCloud, HamDocker, IranServer, MobinHost, IUT) and automatically configures `/etc/apt/sources.list` and `/etc/docker/daemon.json`.
 - **Standalone Offline Bundles**: Pre-packaged tarballs containing all required compose templates and offline scripts without requiring GitHub access during installation.
-  - [pasarguard-standalone.tar.gz](https://github.com/PasarGuard/scripts/releases/latest/download/pasarguard-standalone.tar.gz)
-  - [pg-node-standalone.tar.gz](https://github.com/PasarGuard/scripts/releases/latest/download/pg-node-standalone.tar.gz)
+  - [pasarguard-standalone.tar.gz](https://github.com/GamerKhaan/scripts/releases/latest/download/pasarguard-standalone.tar.gz)
+  - [pg-node-standalone.tar.gz](https://github.com/GamerKhaan/scripts/releases/latest/download/pg-node-standalone.tar.gz)
 
 👉 *Read the English standalone guide in [docs/offline-and-sanctions.md](docs/offline-and-sanctions.md) or the [راهنمای فارسی](iran-sanction/README-pasarguard-standalone.fa.md).*
 
