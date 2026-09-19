@@ -1223,6 +1223,21 @@ wait_for_pasarguard_health() {
     return 1
 }
 
+# Preserve the original PasarGuard existing-install confirmation while routing
+# an accepted operation through the non-destructive adoption path.
+confirm_existing_pasarguard_adoption() {
+    local reply=""
+    colorized_echo red "pasarguard is already installed at $APP_DIR"
+    colorized_echo cyan "Existing database, users, nodes, .env, TLS, ports, and data will be preserved."
+    read -r -p "Do you want to override the previous installation? (y/n) " reply
+    if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+        colorized_echo red "Aborted installation"
+        return 1
+    fi
+    colorized_echo cyan "Continuing with safe in-place migration; existing state will not be regenerated."
+    return 0
+}
+
 # Adopt an existing official PasarGuard installation into the GamerKhaan
 # distribution without replacing .env, database volumes, data, TLS, or templates.
 adopt_existing_pasarguard() {
@@ -1701,6 +1716,9 @@ install_command() {
     # Existing installations are adopted in-place. Their .env, database,
     # data directory, TLS material, and custom templates must not be regenerated.
     if is_pasarguard_installed; then
+        if ! confirm_existing_pasarguard_adoption; then
+            exit 1
+        fi
         existing_install="true"
         colorized_echo cyan "Existing PasarGuard installation detected at $APP_DIR"
         colorized_echo cyan "Install will use safe adoption mode and preserve existing data/configuration."

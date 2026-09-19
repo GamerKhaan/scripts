@@ -46,14 +46,39 @@ else
   fail "detect_existing_panel_distribution exists"
 fi
 
+if declare -F confirm_existing_pasarguard_adoption >/dev/null 2>&1; then
+  APP_DIR="$WORK_DIR/existing-panel"
+  mkdir -p "$APP_DIR"
+  if printf 'n\n' | confirm_existing_pasarguard_adoption >/dev/null 2>&1; then
+    fail "existing Panel install can be declined"
+  else
+    pass "existing Panel install can be declined"
+  fi
+  if printf 'y\n' | confirm_existing_pasarguard_adoption >/dev/null 2>&1; then
+    pass "existing Panel install confirmation continues to safe adoption"
+  else
+    fail "existing Panel install confirmation continues to safe adoption"
+  fi
+else
+  fail "confirm_existing_pasarguard_adoption exists"
+fi
+assert_true "Panel keeps original existing-install question" grep -Fq 'Do you want to override the previous installation? (y/n)' "$ROOT_DIR/pasarguard.sh"
+assert_true "Panel install gates adoption behind confirmation" grep -Fq 'confirm_existing_pasarguard_adoption' "$ROOT_DIR/pasarguard.sh"
+
 if declare -F adopt_existing_pasarguard >/dev/null 2>&1; then
   APP_DIR="$WORK_DIR/migrate-app"; DATA_DIR="$WORK_DIR/migrate-data"
-  mkdir -p "$APP_DIR" "$DATA_DIR"
+  mkdir -p "$APP_DIR" "$DATA_DIR/certs"
   COMPOSE_FILE="$APP_DIR/docker-compose.yml"; ENV_FILE="$APP_DIR/.env"
   printf '%s\n' 'services:' '  pasarguard:' '    image: pasarguard/panel:latest' >"$COMPOSE_FILE"
   printf '%s\n' 'UVICORN_PORT=5051' 'KEEP_ME=unchanged' >"$ENV_FILE"
-  chmod 600 "$ENV_FILE"
+  printf 'sqlite-user-node-admin-marker\n' >"$DATA_DIR/db.sqlite3"
+  printf 'existing-panel-cert\n' >"$DATA_DIR/certs/fullchain.pem"
+  printf 'existing-panel-key\n' >"$DATA_DIR/certs/privkey.pem"
+  chmod 600 "$ENV_FILE" "$DATA_DIR/certs/privkey.pem"
   ENV_SHA="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
+  DB_SHA="$(sha256sum "$DATA_DIR/db.sqlite3" | awk '{print $1}')"
+  CERT_SHA="$(sha256sum "$DATA_DIR/certs/fullchain.pem" | awk '{print $1}')"
+  KEY_SHA="$(sha256sum "$DATA_DIR/certs/privkey.pem" | awk '{print $1}')"
 
   BACKUPS=0
   backup_command() { BACKUPS=$((BACKUPS + 1)); return 0; }
@@ -66,6 +91,9 @@ if declare -F adopt_existing_pasarguard >/dev/null 2>&1; then
   if adopt_existing_pasarguard latest; then pass "stock adoption succeeds"; else fail "stock adoption succeeds"; fi
   assert_eq "$BACKUPS" "1" "backup runs before migration"
   assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$ENV_SHA" ".env remains byte-identical"
+  assert_eq "$(sha256sum "$DATA_DIR/db.sqlite3" | awk '{print $1}')" "$DB_SHA" "Panel data/DB marker remains byte-identical"
+  assert_eq "$(sha256sum "$DATA_DIR/certs/fullchain.pem" | awk '{print $1}')" "$CERT_SHA" "Panel TLS certificate remains byte-identical"
+  assert_eq "$(sha256sum "$DATA_DIR/certs/privkey.pem" | awk '{print $1}')" "$KEY_SHA" "Panel TLS private key remains byte-identical"
   assert_true "compose points to owned image" grep -Fq "image: ghcr.io/gamerkhaan/panel:latest" "$COMPOSE_FILE"
   assert_true "compose migration backup exists" sh -c 'find "$1/migration-backups" -type f -name docker-compose.yml -print -quit | grep -q .' _ "$APP_DIR"
   assert_true "env migration backup exists" sh -c 'find "$1/migration-backups" -type f -name .env -print -quit | grep -q .' _ "$APP_DIR"
@@ -84,6 +112,8 @@ if declare -F adopt_existing_pasarguard >/dev/null 2>&1; then
   if adopt_existing_pasarguard latest; then fail "failed activation returns non-zero"; else pass "failed activation returns non-zero"; fi
   assert_eq "$(sha256sum "$COMPOSE_FILE" | awk '{print $1}')" "$COMPOSE_SHA" "failed activation restores compose"
   assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$ENV_SHA" "failed activation preserves .env"
+  assert_eq "$(sha256sum "$DATA_DIR/db.sqlite3" | awk '{print $1}')" "$DB_SHA" "failed activation preserves Panel data/DB marker"
+  assert_eq "$(sha256sum "$DATA_DIR/certs/privkey.pem" | awk '{print $1}')" "$KEY_SHA" "failed activation preserves Panel TLS key"
 else
   fail "adopt_existing_pasarguard exists"
 fi
