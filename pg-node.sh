@@ -897,6 +897,10 @@ install_node() {
             colorized_echo yellow "  ⚠ Failed to set image version (may not be critical)"
         fi
     fi
+    if ! ensure_node_tun_device; then
+        colorized_echo red "Failed to configure /dev/net/tun in docker-compose.yml"
+        return 1
+    fi
     # Final sync to ensure env has the correct SSL paths for custom names
     sync_env_ssl_paths
     colorized_echo green "✓ docker-compose.yml modified successfully"
@@ -1031,6 +1035,12 @@ update_node() {
     cp -a "$COMPOSE_FILE" "$compose_backup"
 
     if ! set_owned_node_image "$target_image"; then
+        cp -a "$compose_backup" "$COMPOSE_FILE"
+        rm -f "$compose_backup"
+        return 1
+    fi
+
+    if ! ensure_node_tun_device; then
         cp -a "$compose_backup" "$COMPOSE_FILE"
         rm -f "$compose_backup"
         return 1
@@ -1175,6 +1185,21 @@ create_node_adoption_config_backup() {
     printf '%s\n' "$backup_dir"
 }
 
+# Ensure the Node container can create in-process WireGuard/AmneziaWG TUN devices.
+# This upgrades both fresh and adopted compose files without changing any
+# credentials, ports, volumes, or unrelated service settings.
+ensure_node_tun_device() {
+    if ! yq eval -e '.services.node' "$COMPOSE_FILE" >/dev/null 2>&1; then
+        colorized_echo red "Node service was not found in $COMPOSE_FILE"
+        return 1
+    fi
+
+    if ! yq -i '.services.node.devices = ((.services.node.devices // []) + ["/dev/net/tun:/dev/net/tun"] | unique)' "$COMPOSE_FILE"; then
+        colorized_echo red "Could not configure /dev/net/tun for the Node container."
+        return 1
+    fi
+}
+
 # Update only the node service image while keeping all other compose settings.
 set_owned_node_image() {
     local target_image="$1"
@@ -1212,6 +1237,25 @@ wait_for_node_health() {
     done
 
     return 1
+}
+
+# Preserve the original PasarGuard Node existing-install confirmation while
+# routing accepted installs through the non-destructive adoption path.
+confirm_existing_node_adoption() {
+    local reply=""
+    colorized_echo red "node is already installed at $APP_DIR"
+    colorized_echo cyan "Existing API key, TLS, ports, data, and service configuration will be preserved."
+    if [ "${INSTALL_OVERRIDE:-false}" = true ] || [ "$AUTO_CONFIRM" = true ]; then
+        reply="y"
+    else
+        read -r -p "Do you want to override the previous installation? (y/n) " reply
+    fi
+    if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+        colorized_echo red "Aborted installation"
+        return 1
+    fi
+    colorized_echo cyan "Continuing with safe in-place migration; existing state will not be regenerated."
+    return 0
 }
 
 # Adopt an existing official Node into the GamerKhaan distribution without
@@ -1255,6 +1299,12 @@ adopt_existing_node() {
     }
 
     if ! set_owned_node_image "$target_image"; then
+        rollback_node_adoption
+        unset -f rollback_node_adoption
+        return 1
+    fi
+
+    if ! ensure_node_tun_device; then
         rollback_node_adoption
         unset -f rollback_node_adoption
         return 1
@@ -1392,6 +1442,9 @@ install_command() {
     # Existing nodes are adopted in-place. Do not regenerate API keys,
     # certificates, ports, data, or service configuration.
     if is_node_installed; then
+        if ! confirm_existing_node_adoption; then
+            exit 1
+        fi
         existing_install="true"
         colorized_echo cyan "Existing PasarGuard Node detected at $APP_DIR"
         colorized_echo cyan "Install will use safe adoption mode and preserve existing Node configuration."

@@ -46,6 +46,48 @@ else
   fail "detect_existing_node_distribution exists"
 fi
 
+assert_true "Node compose template exposes TUN device" grep -Fq '/dev/net/tun:/dev/net/tun' "$ROOT_DIR/docker-compose/node.yml"
+
+if declare -F ensure_node_tun_device >/dev/null 2>&1; then
+  TUN_COMPOSE="$WORK_DIR/tun-compose.yml"
+  printf '%s\n' 'services:' '  node:' '    image: ghcr.io/gamerkhaan/node:latest' >"$TUN_COMPOSE"
+  COMPOSE_FILE="$TUN_COMPOSE"
+  if ensure_node_tun_device; then pass "ensure_node_tun_device succeeds"; else fail "ensure_node_tun_device succeeds"; fi
+  assert_eq "$(yq eval -r '.services.node.devices[]' "$TUN_COMPOSE")" "/dev/net/tun:/dev/net/tun" "TUN device is injected into existing compose"
+  ensure_node_tun_device
+  assert_eq "$(yq eval '[.services.node.devices[] | select(. == "/dev/net/tun:/dev/net/tun")] | length' "$TUN_COMPOSE")" "1" "TUN device injection is idempotent"
+else
+  fail "ensure_node_tun_device exists"
+fi
+
+if declare -F confirm_existing_node_adoption >/dev/null 2>&1; then
+  APP_DIR="$WORK_DIR/existing-node"
+  mkdir -p "$APP_DIR"
+  AUTO_CONFIRM=false
+  INSTALL_OVERRIDE=false
+  if printf 'n\n' | confirm_existing_node_adoption >/dev/null 2>&1; then
+    fail "existing Node install can be declined"
+  else
+    pass "existing Node install can be declined"
+  fi
+  if printf 'y\n' | confirm_existing_node_adoption >/dev/null 2>&1; then
+    pass "existing Node install confirmation continues to safe adoption"
+  else
+    fail "existing Node install confirmation continues to safe adoption"
+  fi
+  AUTO_CONFIRM=true
+  if confirm_existing_node_adoption </dev/null >/dev/null 2>&1; then
+    pass "Node -y remains explicit non-interactive confirmation"
+  else
+    fail "Node -y remains explicit non-interactive confirmation"
+  fi
+  AUTO_CONFIRM=false
+else
+  fail "confirm_existing_node_adoption exists"
+fi
+assert_true "Node keeps original existing-install question" grep -Fq 'Do you want to override the previous installation? (y/n)' "$ROOT_DIR/pg-node.sh"
+assert_true "Node install gates adoption behind confirmation" grep -Fq 'confirm_existing_node_adoption' "$ROOT_DIR/pg-node.sh"
+
 if declare -F adopt_existing_node >/dev/null 2>&1; then
   APP_DIR="$WORK_DIR/migrate-app"; DATA_DIR="$WORK_DIR/migrate-data"
   mkdir -p "$APP_DIR" "$DATA_DIR/certs"
@@ -54,8 +96,10 @@ if declare -F adopt_existing_node >/dev/null 2>&1; then
   printf '%s\n' 'API_KEY=11111111-2222-4333-8444-555555555555' 'SERVICE_PORT=16953' 'SERVICE_PROTOCOL=grpc' 'SSL_CERT_FILE=/var/lib/pg-node/certs/ssl_cert.pem' 'SSL_KEY_FILE=/var/lib/pg-node/certs/ssl_key.pem' >"$ENV_FILE"
   printf "cert-fixture\n" >"$DATA_DIR/certs/ssl_cert.pem"
   printf "key-fixture\n" >"$DATA_DIR/certs/ssl_key.pem"
+  printf "existing-node-runtime-data\n" >"$DATA_DIR/runtime-marker"
   chmod 600 "$ENV_FILE" "$DATA_DIR/certs/ssl_key.pem"
   ENV_SHA="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
+  DATA_SHA="$(sha256sum "$DATA_DIR/runtime-marker" | awk '{print $1}')"
   CERT_SHA="$(sha256sum "$DATA_DIR/certs/ssl_cert.pem" | awk '{print $1}')"
   KEY_SHA="$(sha256sum "$DATA_DIR/certs/ssl_key.pem" | awk '{print $1}')"
 
@@ -69,7 +113,9 @@ if declare -F adopt_existing_node >/dev/null 2>&1; then
   assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$ENV_SHA" "Node .env remains byte-identical"
   assert_eq "$(sha256sum "$DATA_DIR/certs/ssl_cert.pem" | awk '{print $1}')" "$CERT_SHA" "Node cert remains byte-identical"
   assert_eq "$(sha256sum "$DATA_DIR/certs/ssl_key.pem" | awk '{print $1}')" "$KEY_SHA" "Node key remains byte-identical"
+  assert_eq "$(sha256sum "$DATA_DIR/runtime-marker" | awk '{print $1}')" "$DATA_SHA" "Node data marker remains byte-identical"
   assert_true "Node compose points to owned image" grep -Fq "image: ghcr.io/gamerkhaan/node:latest" "$COMPOSE_FILE"
+  assert_true "Node adoption adds TUN device" grep -Fq "/dev/net/tun:/dev/net/tun" "$COMPOSE_FILE"
   assert_true "Node compose migration backup exists" sh -c 'find "$1/migration-backups" -type f -name docker-compose.yml -print -quit | grep -q .' _ "$APP_DIR"
   assert_true "Node env migration backup exists" sh -c 'find "$1/migration-backups" -type f -name .env -print -quit | grep -q .' _ "$APP_DIR"
   assert_true "Node cert migration backup exists" sh -c 'find "$1/migration-backups" -type f -path "*/certs/ssl_cert.pem" -print -quit | grep -q .' _ "$APP_DIR"
@@ -88,6 +134,7 @@ if declare -F adopt_existing_node >/dev/null 2>&1; then
   if adopt_existing_node latest; then fail "failed Node activation returns non-zero"; else pass "failed Node activation returns non-zero"; fi
   assert_eq "$(sha256sum "$COMPOSE_FILE" | awk '{print $1}')" "$COMPOSE_SHA" "failed Node activation restores compose"
   assert_eq "$(sha256sum "$ENV_FILE" | awk '{print $1}')" "$ENV_SHA" "failed Node activation preserves .env"
+  assert_eq "$(sha256sum "$DATA_DIR/runtime-marker" | awk '{print $1}')" "$DATA_SHA" "failed Node activation preserves data marker"
 else
   fail "adopt_existing_node exists"
 fi
@@ -125,6 +172,7 @@ COMPOSE="compose_mock"
 wait_for_node_health() { return 0; }
 if update_node; then pass "node update switches to latest owned release"; else fail "node update switches to latest owned release"; fi
 assert_true "node update writes latest owned image" grep -Fq 'image: ghcr.io/gamerkhaan/node:v0.5.4-awg31.9' "$COMPOSE_FILE"
+assert_true "node update preserves/adds TUN device" grep -Fq '/dev/net/tun:/dev/net/tun' "$COMPOSE_FILE"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
