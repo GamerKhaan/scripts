@@ -153,6 +153,30 @@ wait_for_pasarguard_health() { return 0; }
 if update_pasarguard; then pass "panel update switches to latest owned release"; else fail "panel update switches to latest owned release"; fi
 assert_true "panel update writes latest owned image" grep -Fq 'image: ghcr.io/gamerkhaan/panel:v5.4.1-awg31.9' "$COMPOSE_FILE"
 
+if declare -F reexec_updated_pasarguard_cli >/dev/null 2>&1; then
+  check_running_as_root() { return 0; }
+  is_pasarguard_installed() { return 0; }
+  detect_compose() { COMPOSE=compose_mock; }
+  UPDATE_SCRIPT_CALLS=0; REEXEC_CALLS=0; RUNTIME_UPDATE_CALLS=0
+  update_pasarguard_script() { UPDATE_SCRIPT_CALLS=$((UPDATE_SCRIPT_CALLS + 1)); }
+  reexec_updated_pasarguard_cli() { REEXEC_CALLS=$((REEXEC_CALLS + 1)); return 0; }
+  uninstall_completion() { return 0; }
+  install_completion() { return 0; }
+  update_pasarguard() { RUNTIME_UPDATE_CALLS=$((RUNTIME_UPDATE_CALLS + 1)); return 0; }
+  unset PASARGUARD_UPDATE_REEXEC
+  update_command
+  assert_eq "$UPDATE_SCRIPT_CALLS" "1" "Panel update refreshes CLI before runtime update"
+  assert_eq "$REEXEC_CALLS" "1" "Panel update re-execs refreshed CLI"
+  assert_eq "$RUNTIME_UPDATE_CALLS" "0" "Panel stale process does not continue runtime update"
+  UPDATE_SCRIPT_CALLS=0; REEXEC_CALLS=0; RUNTIME_UPDATE_CALLS=0
+  PASARGUARD_UPDATE_REEXEC=1 update_command
+  assert_eq "$UPDATE_SCRIPT_CALLS" "0" "Panel fresh re-exec skips second self-update"
+  assert_eq "$REEXEC_CALLS" "0" "Panel fresh re-exec does not recurse"
+  assert_eq "$RUNTIME_UPDATE_CALLS" "1" "Panel fresh re-exec performs runtime update"
+else
+  fail "reexec_updated_pasarguard_cli exists"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

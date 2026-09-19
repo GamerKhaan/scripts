@@ -2016,9 +2016,22 @@ logs_command() {
     fi
 }
 
+# Re-execute the freshly installed CLI so the same update invocation uses
+# the new function definitions instead of continuing with the stale process.
+reexec_updated_node_cli() {
+    local installed_cli="/usr/local/bin/$APP_NAME"
+    if [ ! -x "$installed_cli" ]; then
+        colorized_echo red "Updated Node CLI was not found at $installed_cli"
+        return 1
+    fi
+    export PG_NODE_UPDATE_REEXEC=1
+    exec "$installed_cli" update "$@"
+}
+
 # Update node script, completions, container images, and restart services.
 update_command() {
     check_running_as_root
+    local original_args=("$@")
     local no_update_service=false
     # Parse args
     while [[ "$#" -gt 0 ]]; do
@@ -2039,7 +2052,13 @@ update_command() {
         exit 1
     fi
     detect_compose
-    update_node_script
+    if [ "${PG_NODE_UPDATE_REEXEC:-0}" != "1" ]; then
+        update_node_script
+        reexec_updated_node_cli "${original_args[@]}"
+        return $?
+    fi
+    unset PG_NODE_UPDATE_REEXEC
+
     uninstall_completion
     install_completion
     colorized_echo blue "Updating to the latest owned release"

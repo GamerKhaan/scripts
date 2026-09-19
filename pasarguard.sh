@@ -2233,11 +2233,24 @@ up_command() {
     fi
 }
 
+# Re-execute the freshly installed CLI so the same update invocation uses
+# the new function definitions instead of continuing with the stale process.
+reexec_updated_pasarguard_cli() {
+    local installed_cli="/usr/local/bin/pasarguard"
+    if [ ! -x "$installed_cli" ]; then
+        colorized_echo red "Updated pasarguard CLI was not found at $installed_cli"
+        return 1
+    fi
+    export PASARGUARD_UPDATE_REEXEC=1
+    exec "$installed_cli" update "$@"
+}
+
 # Update the PasarGuard CLI script, pull updated Docker images, and restart services.
 # Returns:
 #   0 on success; exits with code 1 if not installed.
 update_command() {
     check_running_as_root
+    local original_args=("$@")
     # Check if pasarguard is installed
     if ! is_pasarguard_installed; then
         colorized_echo red "pasarguard's not installed!"
@@ -2246,7 +2259,13 @@ update_command() {
 
     detect_compose
 
-    update_pasarguard_script
+    if [ "${PASARGUARD_UPDATE_REEXEC:-0}" != "1" ]; then
+        update_pasarguard_script
+        reexec_updated_pasarguard_cli "${original_args[@]}"
+        return $?
+    fi
+    unset PASARGUARD_UPDATE_REEXEC
+
     uninstall_completion
     install_completion
     colorized_echo blue "Updating to the latest owned release"
