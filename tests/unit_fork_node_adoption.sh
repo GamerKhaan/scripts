@@ -174,6 +174,32 @@ if update_node; then pass "node update switches to latest owned release"; else f
 assert_true "node update writes latest owned image" grep -Fq 'image: ghcr.io/gamerkhaan/node:v0.5.4-awg31.9' "$COMPOSE_FILE"
 assert_true "node update preserves/adds TUN device" grep -Fq '/dev/net/tun:/dev/net/tun' "$COMPOSE_FILE"
 
+if declare -F reexec_updated_node_cli >/dev/null 2>&1; then
+  check_running_as_root() { return 0; }
+  is_node_installed() { return 0; }
+  detect_compose() { COMPOSE=compose_mock; }
+  UPDATE_SCRIPT_CALLS=0; REEXEC_CALLS=0; RUNTIME_UPDATE_CALLS=0
+  update_node_script() { UPDATE_SCRIPT_CALLS=$((UPDATE_SCRIPT_CALLS + 1)); }
+  reexec_updated_node_cli() { REEXEC_CALLS=$((REEXEC_CALLS + 1)); return 0; }
+  uninstall_completion() { return 0; }
+  install_completion() { return 0; }
+  update_node() { RUNTIME_UPDATE_CALLS=$((RUNTIME_UPDATE_CALLS + 1)); return 0; }
+  update_service_if_installed() { return 0; }
+  SERVICE_NAME="pg-node-service"
+  unset PG_NODE_UPDATE_REEXEC
+  update_command --no-update-service
+  assert_eq "$UPDATE_SCRIPT_CALLS" "1" "Node update refreshes CLI before runtime update"
+  assert_eq "$REEXEC_CALLS" "1" "Node update re-execs refreshed CLI"
+  assert_eq "$RUNTIME_UPDATE_CALLS" "0" "Node stale process does not continue runtime update"
+  UPDATE_SCRIPT_CALLS=0; REEXEC_CALLS=0; RUNTIME_UPDATE_CALLS=0
+  PG_NODE_UPDATE_REEXEC=1 update_command --no-update-service
+  assert_eq "$UPDATE_SCRIPT_CALLS" "0" "Node fresh re-exec skips second self-update"
+  assert_eq "$REEXEC_CALLS" "0" "Node fresh re-exec does not recurse"
+  assert_eq "$RUNTIME_UPDATE_CALLS" "1" "Node fresh re-exec performs runtime update"
+else
+  fail "reexec_updated_node_cli exists"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1
